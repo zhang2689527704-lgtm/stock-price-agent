@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""DeepSeek API backend (OpenAI-compatible /chat/completions).
-
-Ключ берётся из переменной окружения DEEPSEEK_API_KEY и нигде не сохраняется.
-"""
-
 import json
 import os
 import re
