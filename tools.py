@@ -1,11 +1,3 @@
-# -*- coding: utf-8 -*-
-"""4 инструмента для агента: find_security, get_close_price, get_history, calculate.
-
-Данные: MOEX ISS (https://iss.moex.com). Ответы API кэшируются в cache/*.json.
-Офлайн-режим: переменная окружения OFFLINE=1 (или tools.OFFLINE = True) —
-тогда сеть не используется, читается только кэш.
-"""
-
 import ast
 import datetime
 import hashlib
