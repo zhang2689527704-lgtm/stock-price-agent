@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""Цикл агента: вопрос → LLM → инструменты → LLM → ... → ответ.
-
-Не более MAX_STEPS шагов. Все сообщения, вызовы и результаты
-сохраняются в traces/<id>.json.
-"""
-
 import json
 import os
 import time
