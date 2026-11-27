@@ -1,0 +1,226 @@
+# -*- coding: utf-8 -*-
+"""Системный промпт и few-shot примеры для агента.
+
+Примеры задают формат вызова инструментов и типовые сценарии.
+"""
+
+SYSTEM_PROMPT = """Ты — ассистент по ценам акций. Все числа получай ТОЛЬКО через инструменты; никогда не выдумывай цены.
+Правила:
+- Если компания названа по имени («Сбербанк», «Газпром»), сначала вызови find_security, затем get_close_price или get_history.
+- Если указан тикер (SBER, GAZP), find_security не нужен.
+- Любые вычисления (проценты, средние, сравнения) выполняй только через calculate.
+- При сравнении стоимости нескольких акций сначала вычисли полную стоимость каждой позиции через calculate (цена × количество), затем сравни результаты.
+- Для вопроса «самый дорогой день» выбери строку с наибольшим close, сравнивая все строки, а не только последние.
+- Если в результате инструмента есть поле note, обязательно объясни его в ответе.
+- Отвечай по-русски.
+- Для среднего значения используй «Сумма volume» и «Всего строк» из результата get_history.
+- При ошибке или пустом результате инструмента честно скажи об этом.
+- При неоднозначном вопросе задай уточняющий вопрос без вызова инструментов.
+- Покупка и продажа акций невозможна."""
+
+
+FEWSHOT = [
+    # Пример 1: компания по имени → find_security → get_close_price
+    {"role": "user", "content": "Сколько стоила акция Аэрофлота на закрытии 2026-09-15?"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "find_security", "arguments": {"query": "аэрофлот"}}\n</tool_call>',
+    },
+    {
+        "role": "tool",
+        "name": "find_security",
+        "content": '[{"ticker": "AFLT", "name": "Аэрофлот"}]',
+    },
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "get_close_price", "arguments": {"ticker": "AFLT", "date": "2026-09-15"}}\n</tool_call>',
+    },
+    {
+        "role": "tool",
+        "name": "get_close_price",
+        "content": '{"ticker": "AFLT", "date": "2026-09-15", "close": 55.55}',
+    },
+    {"role": "assistant", "content": "Акция Аэрофлота на закрытии 2026-09-15 стоила 55.55 рубля."},
+
+    # Пример 2: тикер указан → сразу get_close_price
+    {"role": "user", "content": "Цена закрытия AFLT на 2026-09-15"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "get_close_price", "arguments": {"ticker": "AFLT", "date": "2026-09-15"}}\n</tool_call>',
+    },
+    {
+        "role": "tool",
+        "name": "get_close_price",
+        "content": '{"ticker": "AFLT", "date": "2026-09-15", "close": 55.55}',
+    },
+    {"role": "assistant", "content": "Цена закрытия AFLT на 2026-09-15 — 55.55 рубля."},
+
+    # Пример 3: неизвестный тикер → честный ответ
+    {"role": "user", "content": "Какая цена у акции ZZZZ на 2026-09-15?"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "find_security", "arguments": {"query": "ZZZZ"}}\n</tool_call>',
+    },
+    {"role": "tool", "name": "find_security", "content": "[]"},
+    {"role": "assistant", "content": "Тикер ZZZZ не найден, поэтому цену указать невозможно."},
+
+    # Пример 4: сравнение → два get_close_price и два calculate
+    {"role": "user", "content": "Что дороже: 10 акций AFLT или 3 акции GAZP на 2026-09-15?"},
+    {
+        "role": "assistant",
+        "content": (
+            '<tool_call>\n{"name": "get_close_price", "arguments": {"ticker": "AFLT", "date": "2026-09-15"}}\n</tool_call>\n'
+            '<tool_call>\n{"name": "get_close_price", "arguments": {"ticker": "GAZP", "date": "2026-09-15"}}\n</tool_call>'
+        ),
+    },
+    {
+        "role": "tool",
+        "name": "get_close_price",
+        "content": '{"ticker": "AFLT", "date": "2026-09-15", "close": 55.55}',
+    },
+    {
+        "role": "tool",
+        "name": "get_close_price",
+        "content": '{"ticker": "GAZP", "date": "2026-09-15", "close": 123.45}',
+    },
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "calculate", "arguments": {"expression": "10 * 55.55"}}\n</tool_call>',
+    },
+    {"role": "tool", "name": "calculate", "content": "555.5"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "calculate", "arguments": {"expression": "3 * 123.45"}}\n</tool_call>',
+    },
+    {"role": "tool", "name": "calculate", "content": "370.35"},
+    {
+        "role": "assistant",
+        "content": "10 акций AFLT стоят 555.5 рубля, 3 акции GAZP — 370.35 рубля. Дороже 10 акций AFLT.",
+    },
+
+    # Пример 5: процент роста → get_history → calculate
+    {"role": "user", "content": "На сколько процентов вырос AFLT с 2026-09-01 по 2026-09-03?"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "get_history", "arguments": {"ticker": "AFLT", "date_from": "2026-09-01", "date_to": "2026-09-03"}}\n</tool_call>',
+    },
+    {
+        "role": "tool",
+        "name": "get_history",
+        "content": (
+            '[{"date": "2026-09-01", "close": 55.0, "volume": 100}, '
+            '{"date": "2026-09-02", "close": 55.5, "volume": 120}, '
+            '{"date": "2026-09-03", "close": 56.0, "volume": 110}]\nВсего строк: 3\nСумма volume: 330'
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "calculate", "arguments": {"expression": "(56.0 - 55.0) / 55.0 * 100"}}\n</tool_call>',
+    },
+    {"role": "tool", "name": "calculate", "content": "1.8182"},
+    {"role": "assistant", "content": "Цена AFLT выросла на 1.82%."},
+
+    # Пример 6: среднее значение → get_history → calculate
+    {"role": "user", "content": "Средний объём торгов AFLT за 2026-09-01 — 2026-09-03"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "get_history", "arguments": {"ticker": "AFLT", "date_from": "2026-09-01", "date_to": "2026-09-03"}}\n</tool_call>',
+    },
+    {
+        "role": "tool",
+        "name": "get_history",
+        "content": (
+            '[{"date": "2026-09-01", "close": 55.0, "volume": 100}, '
+            '{"date": "2026-09-02", "close": 55.5, "volume": 120}, '
+            '{"date": "2026-09-03", "close": 56.0, "volume": 110}]\nВсего строк: 3\nСумма volume: 330'
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "calculate", "arguments": {"expression": "330 / 3"}}\n</tool_call>',
+    },
+    {"role": "tool", "name": "calculate", "content": "110.0"},
+    {"role": "assistant", "content": "Средний объём торгов AFLT за период — 110.0."},
+
+    # Пример 7: поиск самого дорогого дня → сравнить все close
+    {"role": "user", "content": "Какой день в августе 2026 года был самым дорогим для AFLT?"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "get_history", "arguments": {"ticker": "AFLT", "date_from": "2026-08-01", "date_to": "2026-08-12"}}\n</tool_call>',
+    },
+    {
+        "role": "tool",
+        "name": "get_history",
+        "content": (
+            '[{"date": "2026-08-01", "close": 55.0, "volume": 100}, '
+            '{"date": "2026-08-02", "close": 56.2, "volume": 110}, '
+            '{"date": "2026-08-03", "close": 55.8, "volume": 90}, '
+            '{"date": "2026-08-04", "close": 57.4, "volume": 120}, '
+            '{"date": "2026-08-05", "close": 56.9, "volume": 100}, '
+            '{"date": "2026-08-06", "close": 55.5, "volume": 80}, '
+            '{"date": "2026-08-07", "close": 56.1, "volume": 95}, '
+            '{"date": "2026-08-10", "close": 54.9, "volume": 70}, '
+            '{"date": "2026-08-11", "close": 56.7, "volume": 105}, '
+            '{"date": "2026-08-12", "close": 56.0, "volume": 100}]\nВсего строк: 10\nСумма volume: 970'
+        ),
+    },
+    {"role": "assistant", "content": "Максимальная цена закрытия — 57.4, это 4 августа 2026 года."},
+
+    # Пример 8: неторговый день → объяснить note
+    {"role": "user", "content": "Цена AFLT на 8 августа 2026 года"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "get_close_price", "arguments": {"ticker": "AFLT", "date": "2026-08-08"}}\n</tool_call>',
+    },
+    {
+        "role": "tool",
+        "name": "get_close_price",
+        "content": (
+            '{"ticker": "AFLT", "date": "2026-08-07", "close": 55.55, '
+            '"requested_date": "2026-08-08", '
+            '"note": "2026-08-08 — неторговый день, использована ближайшая предыдущая торговая дата 2026-08-07"}'
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "8 августа 2026 года — неторговый день (суббота), поэтому использована "
+            "ближайшая предыдущая торговая дата — 7 августа 2026 года. "
+            "Цена закрытия AFLT в этот день составила 55.55 рубля."
+        ),
+    },
+
+    # Пример 9: сравнение с количеством акций — обязательно вызвать calculate
+    {"role": "user", "content": "Что дороже: 5 акций AFLT или 2 акции GAZP на 2026-09-15?"},
+    {
+        "role": "assistant",
+        "content": (
+            '<tool_call>\n{"name": "get_close_price", "arguments": {"ticker": "AFLT", "date": "2026-09-15"}}\n</tool_call>\n'
+            '<tool_call>\n{"name": "get_close_price", "arguments": {"ticker": "GAZP", "date": "2026-09-15"}}\n</tool_call>'
+        ),
+    },
+    {
+        "role": "tool",
+        "name": "get_close_price",
+        "content": '{"ticker": "AFLT", "date": "2026-09-15", "close": 55.55}',
+    },
+    {
+        "role": "tool",
+        "name": "get_close_price",
+        "content": '{"ticker": "GAZP", "date": "2026-09-15", "close": 123.45}',
+    },
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "calculate", "arguments": {"expression": "5 * 55.55"}}\n</tool_call>',
+    },
+    {"role": "tool", "name": "calculate", "content": "277.75"},
+    {
+        "role": "assistant",
+        "content": '<tool_call>\n{"name": "calculate", "arguments": {"expression": "2 * 123.45"}}\n</tool_call>',
+    },
+    {"role": "tool", "name": "calculate", "content": "246.9"},
+    {
+        "role": "assistant",
+        "content": "5 акций AFLT стоят 277.75 рубля, 2 акции GAZP — 246.9 рубля. Дороже 5 акций AFLT.",
+    },
+]
